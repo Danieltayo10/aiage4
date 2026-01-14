@@ -6,12 +6,15 @@ from docx import Document
 from openai import OpenAI
 import requests
 from bs4 import BeautifulSoup
-import smtplib
-from email.mime.text import MIMEText
 from dotenv import load_dotenv
+
+# SendGrid for emails
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 
 load_dotenv()
 
+# ---------- OpenAI Client ----------
 key = os.getenv("OpenAI_API_KEY")
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=key)
 
@@ -51,15 +54,19 @@ def answer_question(text, question):
     return response.choices[0].message.content
 
 def send_invoice_email(to_email, subject, body):
-    """Send invoice or payment reminder via email."""
-    msg = MIMEText(body)
-    msg['Subject'] = subject
-    msg['From'] = os.environ.get("EMAIL_USER")
-    msg['To'] = to_email
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
-        server.starttls()
-        server.login(os.environ.get("EMAIL_USER"), os.environ.get("EMAIL_PASS"))
-        server.send_message(msg)
+    """Send invoice using SendGrid API."""
+    message = Mail(
+        from_email=os.environ.get("EMAIL_USER"),
+        to_emails=to_email,
+        subject=subject,
+        plain_text_content=body
+    )
+    try:
+        sg = SendGridAPIClient(os.environ.get("SENDGRID_API_KEY"))
+        response = sg.send(message)
+        return True, f"Invoice sent successfully! Status code: {response.status_code}"
+    except Exception as e:
+        return False, f"Failed to send invoice: {e}"
 
 def scrape_competitor(url):
     """Scrape product data from competitor website."""
@@ -141,19 +148,25 @@ elif module == "Invoice Generator & Payment Reminder":
         amount = st.number_input("Amount ($)", min_value=0.0, step=0.01)
 
     if st.button("Generate Invoice & Send Email"):
-        invoice_text = f"Invoice #{order_id}\nClient: {client_name}\nAmount Due: ${amount}"
-        send_invoice_email(client_email, f"Invoice #{order_id}", invoice_text)
-        st.session_state.invoices.append({
-            "order_id": order_id,
-            "client": client_name,
-            "email": client_email,
-            "amount": amount,
-            "text": invoice_text
-        })
+        if client_email and client_name and order_id and amount > 0:
+            invoice_text = f"Invoice #{order_id}\nClient: {client_name}\nAmount Due: ${amount}"
+            success, message = send_invoice_email(client_email, f"Invoice #{order_id}", invoice_text)
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+            st.session_state.invoices.append({
+                "order_id": order_id,
+                "client": client_name,
+                "email": client_email,
+                "amount": amount,
+                "text": invoice_text
+            })
 
     for i, inv in enumerate(st.session_state.invoices):
         with st.expander(f"Invoice #{inv['order_id']} - {inv['client']}"):
             st.code(inv["text"])
+            st.markdown(f"**Email:** {inv['email']}")
             if st.button("Delete Invoice", key=f"delete_invoice_{i}"):
                 st.session_state.invoices.pop(i)
 
