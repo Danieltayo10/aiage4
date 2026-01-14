@@ -3,4 +3,4 @@ openai
 PyPDF2                    
 beautifulsoup4     
 requests          
-smtplib          
+python-docx          
