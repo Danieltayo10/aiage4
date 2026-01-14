@@ -6,8 +6,6 @@ from docx import Document
 from openai import OpenAI
 import requests
 from bs4 import BeautifulSoup
-import smtplib
-from email.mime.text import MIMEText
 from dotenv import load_dotenv
 import socket
 
@@ -20,7 +18,7 @@ client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=key)
 def extract_text(file):
     if file.name.endswith(".pdf"):
         reader = PyPDF2.PdfReader(file)
-        return "\n".join([page.extract_text() for page in reader.pages])
+        return "\n".join([page.extract_text() or "" for page in reader.pages])
     elif file.name.endswith(".docx"):
         doc = Document(file)
         return "\n".join([p.text for p in doc.paragraphs])
@@ -48,26 +46,13 @@ def answer_question(text, question):
     )
     return response.choices[0].message.content
 
-# ---------- Email Function with Render-Safe Check ----------
-def send_invoice_email(to_email, subject, body):
-    """Send invoice email. On Render, skip to prevent network error."""
-    try:
-        # Try to resolve SMTP host; if network unreachable, skip
-        socket.gethostbyname("smtp.gmail.com")
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.starttls()
-            server.login(os.environ.get("EMAIL_USER"), os.environ.get("EMAIL_PASS"))
-            msg = MIMEText(body)
-            msg['Subject'] = subject
-            msg['From'] = os.environ.get("EMAIL_USER")
-            msg['To'] = to_email
-            server.send_message(msg)
-    except Exception as e:
-        # On Render or network issues, skip email
-        print(f"⚠️ Skipped sending email: {e}")
-
 def scrape_competitor(url):
-    response = requests.get(url)
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        st.error(f"Failed to fetch URL: {e}")
+        return []
     soup = BeautifulSoup(response.text, "html.parser")
     products = []
     for item in soup.select(".product"):
@@ -117,29 +102,54 @@ if module == "Contract Review & Summarizer":
         text = extract_text(uploaded_file)
         summary = summarize_text(text, task="contract")
         st.session_state.contract_docs.append({"filename": uploaded_file.name, "text": text, "summary": summary})
-    for i, doc in enumerate(st.session_state.contract_docs):
+    for i in range(len(st.session_state.contract_docs)-1, -1, -1):
+        doc = st.session_state.contract_docs[i]
         with st.expander(f"{doc['filename']}"):
             st.markdown(f"**Summary:**\n{doc['summary']}")
             if st.button("Delete", key=f"delete_contract_{i}"):
                 st.session_state.contract_docs.pop(i)
 
-# ---------- Module 2 ----------
+# ---------- Module 2: Invoice Generator & Download ----------
 elif module == "Invoice Generator & Payment Reminder":
     st.subheader("💰 Invoice Generator")
+    
     col1, col2 = st.columns(2)
     with col1:
         client_name = st.text_input("Client Name")
-        client_email = st.text_input("Client Email")
+        client_email = st.text_input("Client Email (optional)")
     with col2:
         order_id = st.text_input("Order ID")
         amount = st.number_input("Amount ($)", min_value=0.0, step=0.01)
-    if st.button("Generate Invoice & Send Email"):
-        invoice_text = f"Invoice #{order_id}\nClient: {client_name}\nAmount Due: ${amount}"
-        send_invoice_email(client_email, f"Invoice #{order_id}", invoice_text)
-        st.session_state.invoices.append({"order_id": order_id, "client": client_name, "email": client_email, "amount": amount, "text": invoice_text})
-    for i, inv in enumerate(st.session_state.invoices):
+    
+    if st.button("Generate Invoice"):
+        invoice_text = f"""
+🎫 **Invoice #{order_id}**  
+
+**Client:** {client_name}  
+**Amount Due:** ${amount:.2f}  
+
+Thank you for your business!  
+"""
+        st.session_state.invoices.append({
+            "order_id": order_id,
+            "client": client_name,
+            "email": client_email,
+            "amount": amount,
+            "text": invoice_text
+        })
+        st.success(f"Invoice #{order_id} generated! ✅")
+    
+    for i in range(len(st.session_state.invoices)-1, -1, -1):
+        inv = st.session_state.invoices[i]
         with st.expander(f"Invoice #{inv['order_id']} - {inv['client']}"):
-            st.code(inv["text"])
+            st.markdown(inv["text"])
+            st.download_button(
+                label="📥 Download Invoice",
+                data=inv["text"],
+                file_name=f"Invoice_{inv['order_id']}.txt",
+                mime="text/plain",
+                key=f"download_invoice_{i}"
+            )
             if st.button("Delete Invoice", key=f"delete_invoice_{i}"):
                 st.session_state.invoices.pop(i)
 
@@ -150,7 +160,8 @@ elif module == "Web & Competitor Research":
     if st.button("Scrape Competitor Data"):
         data = scrape_competitor(url)
         st.session_state.competitor_data.append({"url": url, "data": data})
-    for i, comp in enumerate(st.session_state.competitor_data):
+    for i in range(len(st.session_state.competitor_data)-1, -1, -1):
+        comp = st.session_state.competitor_data[i]
         with st.expander(f"Competitor: {comp['url']}"):
             st.table(comp["data"])
             if st.button("Delete Competitor Data", key=f"delete_comp_{i}"):
@@ -164,7 +175,8 @@ elif module == "Document Summarizer & Knowledge Assistant":
         doc_text = extract_text(uploaded_doc)
         summary = summarize_text(doc_text)
         st.session_state.knowledge_docs.append({"filename": uploaded_doc.name, "text": doc_text, "summary": summary, "question": None, "answer": None})
-    for i, doc in enumerate(st.session_state.knowledge_docs):
+    for i in range(len(st.session_state.knowledge_docs)-1, -1, -1):
+        doc = st.session_state.knowledge_docs[i]
         with st.expander(f"{doc['filename']}"):
             st.markdown(f"**Summary:**\n{doc['summary']}")
             q = st.text_input("Ask a question", key=f"q_{i}")
