@@ -65,13 +65,13 @@ for key in ["contract_docs", "invoices", "competitor_data", "knowledge_docs"]:
     if key not in st.session_state:
         st.session_state[key] = []
 
-# ---------- UI ----------
+# ---------- Layout ----------
 st.set_page_config(page_title="SmartBiz AI Suite", layout="wide")
 st.markdown("<h1 style='text-align:center;color:#4B8BBE;'>🚀 SmartBiz AI Suite</h1>", unsafe_allow_html=True)
 
 module = st.sidebar.radio("Select Module", [
     "Contract Review & Summarizer",
-    "Invoice Generator",
+    "Invoice Generator & Receipt",
     "Web & Competitor Research",
     "Document Summarizer & Knowledge Assistant"
 ])
@@ -80,12 +80,12 @@ module = st.sidebar.radio("Select Module", [
 if module == "Contract Review & Summarizer":
     st.subheader("📄 Contract Review")
 
-    uploaded = st.file_uploader("Upload contract", ["pdf", "docx", "txt"])
-    if uploaded:
-        text = extract_text(uploaded)
-        summary = summarize_text(text, "contract")
+    uploaded_file = st.file_uploader("Upload contract", type=["pdf", "docx", "txt"])
+    if uploaded_file:
+        text = extract_text(uploaded_file)
+        summary = summarize_text(text, task="contract")
         st.session_state.contract_docs.append({
-            "filename": uploaded.name,
+            "filename": uploaded_file.name,
             "text": text,
             "summary": summary,
             "qa": []
@@ -94,67 +94,65 @@ if module == "Contract Review & Summarizer":
     for i in range(len(st.session_state.contract_docs)-1, -1, -1):
         doc = st.session_state.contract_docs[i]
         with st.expander(doc["filename"]):
-            st.markdown("### Summary")
+            st.markdown("### 📌 Contract Summary")
             st.markdown(doc["summary"])
 
-            st.markdown("### Ask more questions")
-            q = st.text_input("Question", key=f"contract_q_{i}")
+            q = st.text_input("Ask a follow-up question", key=f"contract_q_{i}")
             if st.button("Ask", key=f"contract_btn_{i}") and q:
                 a = answer_question(doc["text"], q)
-                doc["qa"].append({"q": q, "a": a})
+                doc["qa"].append((q, a))
 
-            for qa in doc["qa"]:
-                st.markdown(f"**Q:** {qa['q']}")
-                st.markdown(f"**A:** {qa['a']}")
+            for q, a in doc["qa"]:
+                st.markdown(f"**Q:** {q}")
+                st.markdown(f"**A:** {a}")
 
-            if st.button("Delete", key=f"del_contract_{i}"):
+            if st.button("Delete", key=f"delete_contract_{i}"):
                 st.session_state.contract_docs.pop(i)
 
 # ---------- MODULE 2: INVOICE / RECEIPT ----------
-elif module == "Invoice Generator":
-    st.subheader("🧾 Receipt Generator")
+elif module == "Invoice Generator & Receipt":
+    st.subheader("🧾 Invoice Receipt Generator")
 
     col1, col2 = st.columns(2)
     with col1:
         client_name = st.text_input("Client Name")
-        receipt_id = st.text_input("Receipt / Order ID")
+        order_id = st.text_input("Receipt Number")
     with col2:
-        amount = st.number_input("Amount ($)", min_value=0.0)
+        amount = st.number_input("Amount ($)", min_value=0.0, step=0.01)
 
     if st.button("Generate Receipt"):
         receipt_html = f"""
-        <div style="max-width:500px;margin:auto;border-radius:12px;
-        padding:24px;border:1px solid #ddd;font-family:Arial;">
+        <div style="max-width:600px;margin:auto;padding:30px;
+        border-radius:12px;border:1px solid #ddd;font-family:Arial">
         <h2 style="text-align:center;color:#4B8BBE;">Payment Receipt</h2>
         <hr>
+        <p><strong>Receipt #:</strong> {order_id}</p>
         <p><strong>Client:</strong> {client_name}</p>
-        <p><strong>Receipt #:</strong> {receipt_id}</p>
         <p><strong>Amount Paid:</strong> ${amount:.2f}</p>
         <hr>
-        <p style="text-align:center;">Thank you for your business 🙏</p>
+        <p style="text-align:center;">Thank you for your business 💙</p>
         </div>
         """
 
         st.session_state.invoices.append({
-            "id": receipt_id,
+            "order_id": order_id,
             "client": client_name,
             "amount": amount,
             "html": receipt_html
         })
 
-        st.success("Receipt generated!")
-
     for i in range(len(st.session_state.invoices)-1, -1, -1):
         inv = st.session_state.invoices[i]
-        with st.expander(f"Receipt #{inv['id']}"):
-            st.components.v1.html(inv["html"], height=320)
+        with st.expander(f"Receipt #{inv['order_id']}"):
+            st.markdown(inv["html"], unsafe_allow_html=True)
             st.download_button(
-                "⬇ Download Receipt",
+                "📥 Download Receipt",
                 inv["html"],
-                file_name=f"Receipt_{inv['id']}.html",
-                mime="text/html"
+                file_name=f"Receipt_{inv['order_id']}.html",
+                mime="text/html",
+                key=f"dl_{i}"
             )
-            if st.button("Delete", key=f"del_invoice_{i}"):
+            if st.button("Delete", key=f"delete_inv_{i}"):
                 st.session_state.invoices.pop(i)
 
 # ---------- MODULE 3 ----------
@@ -176,14 +174,14 @@ elif module == "Web & Competitor Research":
 
 # ---------- MODULE 4 ----------
 elif module == "Document Summarizer & Knowledge Assistant":
-    st.subheader("🧠 Knowledge Assistant")
+    st.subheader("🧠 Document Q&A")
 
-    uploaded = st.file_uploader("Upload document", ["pdf", "docx", "txt"])
-    if uploaded:
-        text = extract_text(uploaded)
+    uploaded_doc = st.file_uploader("Upload document", type=["pdf", "docx", "txt"])
+    if uploaded_doc:
+        text = extract_text(uploaded_doc)
         summary = summarize_text(text)
         st.session_state.knowledge_docs.append({
-            "filename": uploaded.name,
+            "filename": uploaded_doc.name,
             "text": text,
             "summary": summary,
             "qa": []
@@ -195,15 +193,14 @@ elif module == "Document Summarizer & Knowledge Assistant":
             st.markdown("### Summary")
             st.markdown(doc["summary"])
 
-            st.markdown("### Ask questions")
-            q = st.text_input("Question", key=f"doc_q_{i}")
+            q = st.text_input("Ask another question", key=f"doc_q_{i}")
             if st.button("Ask", key=f"doc_btn_{i}") and q:
                 a = answer_question(doc["text"], q)
-                doc["qa"].append({"q": q, "a": a})
+                doc["qa"].append((q, a))
 
-            for qa in doc["qa"]:
-                st.markdown(f"**Q:** {qa['q']}")
-                st.markdown(f"**A:** {qa['a']}")
+            for q, a in doc["qa"]:
+                st.markdown(f"**Q:** {q}")
+                st.markdown(f"**A:** {a}")
 
-            if st.button("Delete", key=f"del_doc_{i}"):
+            if st.button("Delete", key=f"delete_doc_{i}"):
                 st.session_state.knowledge_docs.pop(i)
