@@ -1,7 +1,8 @@
-streamlit        
-openai            
-PyPDF2                    
-beautifulsoup4     
-requests          
-python-docx          
+streamlit
+openai
+PyPDF2
+python-docx
+beautifulsoup4
+requests
+sendgrid
 python-dotenv
