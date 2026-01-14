@@ -1,4 +1,4 @@
-# smartbiz_streamlit_persistent.py
+# smartbiz_streamlit_ui.py
 import os
 import streamlit as st
 import PyPDF2
@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 key = os.getenv("OpenAI_API_KEY")
-c = OpenAI(base_url="https://openrouter.ai/api/v1",api_key=key)
+client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=key)
 
 # ---------- Helper Functions ----------
 def extract_text(file):
@@ -30,10 +30,11 @@ def extract_text(file):
 
 def summarize_text(text, task="summary"):
     """Summarize contracts or documents using OpenAI."""
-    if task == "contract":
-        prompt = f"Summarize this contract and highlight key clauses, risks, and obligations:\n{text}"
-    else:
-        prompt = f"Summarize this document:\n{text}"
+    prompt = (
+        f"Summarize this contract highlighting key clauses, risks, obligations:\n{text}"
+        if task == "contract"
+        else f"Summarize this document:\n{text}"
+    )
     response = client.chat.completions.create(
         model="mistralai/mixtral-8x7b-instruct",
         messages=[{"role": "user", "content": prompt}]
@@ -73,7 +74,6 @@ def scrape_competitor(url):
 
 # ---------- Streamlit Rerun Helper ----------
 def rerun():
-    """Trigger Streamlit rerun (safe for Render)."""
     from streamlit.runtime.scriptrunner import RerunException
     from streamlit.runtime.scriptrunner import get_script_run_ctx
     raise RerunException(get_script_run_ctx())
@@ -91,20 +91,33 @@ if "competitor_data" not in st.session_state:
 if "knowledge_docs" not in st.session_state:
     st.session_state["knowledge_docs"] = []
 
-# ---------- Streamlit UI ----------
+# ---------- Streamlit Layout ----------
 st.set_page_config(page_title="SmartBiz AI Suite", layout="wide")
-st.title("🚀 SmartBiz AI Suite")
+st.markdown("<h1 style='text-align: center; color: #4B8BBE;'>🚀 SmartBiz AI Suite</h1>", unsafe_allow_html=True)
+st.sidebar.header("Modules")
 
-module = st.sidebar.selectbox("Select Module", [
+module = st.sidebar.radio("Select Module", [
     "Contract Review & Summarizer",
     "Invoice Generator & Payment Reminder",
     "Web & Competitor Research",
     "Document Summarizer & Knowledge Assistant"
 ])
 
+# ---------- Styles ----------
+st.markdown("""
+<style>
+div.stButton > button {
+    width: 100%;
+    background-color: #4B8BBE;
+    color: white;
+    font-weight: bold;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ---------- Module 1: Contract Review ----------
 if module == "Contract Review & Summarizer":
-    st.header("📄 Contract Review")
+    st.subheader("📄 Contract Review")
     uploaded_file = st.file_uploader("Upload PDF, DOCX, or TXT contract", type=["pdf", "docx", "txt"])
     
     if uploaded_file:
@@ -115,24 +128,26 @@ if module == "Contract Review & Summarizer":
             "text": text,
             "summary": summary
         })
-        rerun()  # rerun to display new entry
+        rerun()
 
     for i, doc in enumerate(st.session_state.contract_docs):
-        st.subheader(f"{doc['filename']}")
-        st.write("**Summary:**")
-        st.write(doc["summary"])
-        if st.button(f"Delete {doc['filename']}", key=f"delete_contract_{i}"):
-            st.session_state.contract_docs.pop(i)
-            rerun()
+        with st.expander(f"{doc['filename']}"):
+            st.markdown(f"**Summary:**\n{doc['summary']}")
+            if st.button(f"Delete", key=f"delete_contract_{i}"):
+                st.session_state.contract_docs.pop(i)
+                rerun()
 
 # ---------- Module 2: Invoice Generator ----------
 elif module == "Invoice Generator & Payment Reminder":
-    st.header("💰 Invoice Generator")
-    client_name = st.text_input("Client Name")
-    client_email = st.text_input("Client Email")
-    order_id = st.text_input("Order ID")
-    amount = st.number_input("Amount ($)", min_value=0.0, step=0.01)
-    
+    st.subheader("💰 Invoice Generator")
+    col1, col2 = st.columns(2)
+    with col1:
+        client_name = st.text_input("Client Name")
+        client_email = st.text_input("Client Email")
+    with col2:
+        order_id = st.text_input("Order ID")
+        amount = st.number_input("Amount ($)", min_value=0.0, step=0.01)
+
     if st.button("Generate Invoice & Send Email"):
         invoice_text = f"Invoice #{order_id}\nClient: {client_name}\nAmount Due: ${amount}"
         send_invoice_email(client_email, f"Invoice #{order_id}", invoice_text)
@@ -144,33 +159,33 @@ elif module == "Invoice Generator & Payment Reminder":
             "text": invoice_text
         })
         rerun()
-    
+
     for i, inv in enumerate(st.session_state.invoices):
-        st.subheader(f"Invoice #{inv['order_id']} - {inv['client']}")
-        st.code(inv["text"])
-        if st.button(f"Delete Invoice #{inv['order_id']}", key=f"delete_invoice_{i}"):
-            st.session_state.invoices.pop(i)
-            rerun()
+        with st.expander(f"Invoice #{inv['order_id']} - {inv['client']}"):
+            st.code(inv["text"])
+            if st.button("Delete Invoice", key=f"delete_invoice_{i}"):
+                st.session_state.invoices.pop(i)
+                rerun()
 
 # ---------- Module 3: Competitor Research ----------
 elif module == "Web & Competitor Research":
-    st.header("📊 Competitor Research")
+    st.subheader("📊 Competitor Research")
     url = st.text_input("Enter competitor product page URL")
     if st.button("Scrape Competitor Data"):
         data = scrape_competitor(url)
         st.session_state.competitor_data.append({"url": url, "data": data})
         rerun()
-    
+
     for i, comp in enumerate(st.session_state.competitor_data):
-        st.subheader(f"Competitor: {comp['url']}")
-        st.table(comp["data"])
-        if st.button(f"Delete Competitor Data", key=f"delete_comp_{i}"):
-            st.session_state.competitor_data.pop(i)
-            rerun()
+        with st.expander(f"Competitor: {comp['url']}"):
+            st.table(comp["data"])
+            if st.button("Delete Competitor Data", key=f"delete_comp_{i}"):
+                st.session_state.competitor_data.pop(i)
+                rerun()
 
 # ---------- Module 4: Document Summarizer ----------
 elif module == "Document Summarizer & Knowledge Assistant":
-    st.header("🧠 Document Summarizer & Q&A")
+    st.subheader("🧠 Document Summarizer & Q&A")
     uploaded_doc = st.file_uploader("Upload PDF, DOCX, or TXT document", type=["pdf", "docx", "txt"])
     
     if uploaded_doc:
@@ -186,18 +201,16 @@ elif module == "Document Summarizer & Knowledge Assistant":
         rerun()
 
     for i, doc in enumerate(st.session_state.knowledge_docs):
-        st.subheader(f"{doc['filename']}")
-        st.write("**Summary:**")
-        st.write(doc["summary"])
-        q = st.text_input(f"Ask a question about {doc['filename']}", key=f"q_{i}")
-        if st.button(f"Get Answer for {doc['filename']}", key=f"btn_{i}") and q:
-            answer = answer_question(doc["text"], q)
-            st.session_state.knowledge_docs[i]["question"] = q
-            st.session_state.knowledge_docs[i]["answer"] = answer
-            rerun()
-        if doc.get("answer"):
-            st.write("**Answer:**")
-            st.write(doc["answer"])
-        if st.button(f"Delete {doc['filename']}", key=f"delete_doc_{i}"):
-            st.session_state.knowledge_docs.pop(i)
-            rerun()
+        with st.expander(f"{doc['filename']}"):
+            st.markdown(f"**Summary:**\n{doc['summary']}")
+            q = st.text_input(f"Ask a question", key=f"q_{i}")
+            if st.button("Get Answer", key=f"btn_{i}") and q:
+                answer = answer_question(doc["text"], q)
+                st.session_state.knowledge_docs[i]["question"] = q
+                st.session_state.knowledge_docs[i]["answer"] = answer
+                rerun()
+            if doc.get("answer"):
+                st.markdown(f"**Answer:**\n{doc['answer']}")
+            if st.button("Delete Document", key=f"delete_doc_{i}"):
+                st.session_state.knowledge_docs.pop(i)
+                rerun()
