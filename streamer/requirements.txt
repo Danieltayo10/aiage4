@@ -1,7 +1,6 @@
 streamlit        
 openai            
-PyPDF2              
-python      
+PyPDF2                    
 beautifulsoup4     
 requests          
 smtplib          
