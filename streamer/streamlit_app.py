@@ -74,9 +74,8 @@ def scrape_competitor(url):
 
 # ---------- Streamlit Rerun Helper ----------
 def rerun():
-    from streamlit.runtime.scriptrunner import RerunException
-    from streamlit.runtime.scriptrunner import get_script_run_ctx
-    raise RerunException(get_script_run_ctx())
+    """Trigger a Streamlit rerun safely (Render-ready)."""
+    st.script_request_rerun()
 
 # ---------- Initialize Session State ----------
 if "contract_docs" not in st.session_state:
