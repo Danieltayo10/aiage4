@@ -152,3 +152,58 @@ elif module == "Invoice Generator":
                 "⬇ Download Receipt",
                 inv["html"],
                 file_name=f"Receipt_{inv['id']}.html",
+                mime="text/html"
+            )
+            if st.button("Delete", key=f"del_invoice_{i}"):
+                st.session_state.invoices.pop(i)
+
+# ---------- MODULE 3 ----------
+elif module == "Web & Competitor Research":
+    st.subheader("📊 Competitor Research")
+    url = st.text_input("Competitor URL")
+    if st.button("Scrape"):
+        st.session_state.competitor_data.append({
+            "url": url,
+            "data": scrape_competitor(url)
+        })
+
+    for i in range(len(st.session_state.competitor_data)-1, -1, -1):
+        comp = st.session_state.competitor_data[i]
+        with st.expander(comp["url"]):
+            st.table(comp["data"])
+            if st.button("Delete", key=f"del_comp_{i}"):
+                st.session_state.competitor_data.pop(i)
+
+# ---------- MODULE 4 ----------
+elif module == "Document Summarizer & Knowledge Assistant":
+    st.subheader("🧠 Knowledge Assistant")
+
+    uploaded = st.file_uploader("Upload document", ["pdf", "docx", "txt"])
+    if uploaded:
+        text = extract_text(uploaded)
+        summary = summarize_text(text)
+        st.session_state.knowledge_docs.append({
+            "filename": uploaded.name,
+            "text": text,
+            "summary": summary,
+            "qa": []
+        })
+
+    for i in range(len(st.session_state.knowledge_docs)-1, -1, -1):
+        doc = st.session_state.knowledge_docs[i]
+        with st.expander(doc["filename"]):
+            st.markdown("### Summary")
+            st.markdown(doc["summary"])
+
+            st.markdown("### Ask questions")
+            q = st.text_input("Question", key=f"doc_q_{i}")
+            if st.button("Ask", key=f"doc_btn_{i}") and q:
+                a = answer_question(doc["text"], q)
+                doc["qa"].append({"q": q, "a": a})
+
+            for qa in doc["qa"]:
+                st.markdown(f"**Q:** {qa['q']}")
+                st.markdown(f"**A:** {qa['a']}")
+
+            if st.button("Delete", key=f"del_doc_{i}"):
+                st.session_state.knowledge_docs.pop(i)
