@@ -72,11 +72,6 @@ def scrape_competitor(url):
         products.append({"Name": name, "Price": price})
     return products
 
-# ---------- Streamlit Rerun Helper ----------
-def rerun():
-    """Trigger a Streamlit rerun safely (Render-ready)."""
-    st.script_request_rerun()
-
 # ---------- Initialize Session State ----------
 if "contract_docs" not in st.session_state:
     st.session_state["contract_docs"] = []
@@ -127,14 +122,12 @@ if module == "Contract Review & Summarizer":
             "text": text,
             "summary": summary
         })
-        rerun()
 
     for i, doc in enumerate(st.session_state.contract_docs):
         with st.expander(f"{doc['filename']}"):
             st.markdown(f"**Summary:**\n{doc['summary']}")
             if st.button(f"Delete", key=f"delete_contract_{i}"):
                 st.session_state.contract_docs.pop(i)
-                rerun()
 
 # ---------- Module 2: Invoice Generator ----------
 elif module == "Invoice Generator & Payment Reminder":
@@ -157,14 +150,12 @@ elif module == "Invoice Generator & Payment Reminder":
             "amount": amount,
             "text": invoice_text
         })
-        rerun()
 
     for i, inv in enumerate(st.session_state.invoices):
         with st.expander(f"Invoice #{inv['order_id']} - {inv['client']}"):
             st.code(inv["text"])
             if st.button("Delete Invoice", key=f"delete_invoice_{i}"):
                 st.session_state.invoices.pop(i)
-                rerun()
 
 # ---------- Module 3: Competitor Research ----------
 elif module == "Web & Competitor Research":
@@ -173,14 +164,12 @@ elif module == "Web & Competitor Research":
     if st.button("Scrape Competitor Data"):
         data = scrape_competitor(url)
         st.session_state.competitor_data.append({"url": url, "data": data})
-        rerun()
 
     for i, comp in enumerate(st.session_state.competitor_data):
         with st.expander(f"Competitor: {comp['url']}"):
             st.table(comp["data"])
             if st.button("Delete Competitor Data", key=f"delete_comp_{i}"):
                 st.session_state.competitor_data.pop(i)
-                rerun()
 
 # ---------- Module 4: Document Summarizer ----------
 elif module == "Document Summarizer & Knowledge Assistant":
@@ -197,7 +186,6 @@ elif module == "Document Summarizer & Knowledge Assistant":
             "question": None,
             "answer": None
         })
-        rerun()
 
     for i, doc in enumerate(st.session_state.knowledge_docs):
         with st.expander(f"{doc['filename']}"):
@@ -207,9 +195,7 @@ elif module == "Document Summarizer & Knowledge Assistant":
                 answer = answer_question(doc["text"], q)
                 st.session_state.knowledge_docs[i]["question"] = q
                 st.session_state.knowledge_docs[i]["answer"] = answer
-                rerun()
             if doc.get("answer"):
                 st.markdown(f"**Answer:**\n{doc['answer']}")
             if st.button("Delete Document", key=f"delete_doc_{i}"):
                 st.session_state.knowledge_docs.pop(i)
-                rerun()
