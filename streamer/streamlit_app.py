@@ -35,7 +35,7 @@ def summarize_text(text, task="summary"):
     else:
         prompt = f"Summarize this document:\n{text}"
     response = client.chat.completions.create(
-        model=""mistralai/mixtral-8x7b-instruct"",
+        model="mistralai/mixtral-8x7b-instruct",
         messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content
@@ -44,7 +44,7 @@ def answer_question(text, question):
     """Answer a question based on document content."""
     prompt = f"Based on the document below, answer the question:\n\n{text}\n\nQuestion: {question}"
     response = client.chat.completions.create(
-        model=""mistralai/mixtral-8x7b-instruct"",
+        model="mistralai/mixtral-8x7b-instruct",
         messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content
