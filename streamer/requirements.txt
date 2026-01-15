@@ -1,9 +1,11 @@
 streamlit==1.26.0
-PyPDF2
-python-docx
-requests
-python-dotenv
-openai
-fastapi
-uvicorn[standard]
-pydantic
+PyPDF2==3.0.1
+python-docx==0.8.11
+requests==2.31.0
+python-dotenv==1.0.1
+openai==1.31.0
+fastapi==0.111.0
+uvicorn[standard]==0.23.2
+pydantic==2.5.1
+setuptools>=65.5.0  # ensures wheels build properly
+wheel>=0.40.0      # ensures wheel build properly
