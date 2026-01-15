@@ -7,5 +7,3 @@ openai==1.31.0
 fastapi==0.111.0
 uvicorn[standard]==0.23.2
 pydantic==2.5.1
-setuptools>=65.5.0  # ensures wheels build properly
-wheel>=0.40.0      # ensures wheel build properly
