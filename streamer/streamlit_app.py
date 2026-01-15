@@ -6,12 +6,11 @@ from docx import Document
 from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+from twilio.rest import Client as TwilioClient
 
 load_dotenv()
 
 # ---------- Twilio Setup ----------
-from twilio.rest import Client as TwilioClient
-
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
@@ -54,9 +53,6 @@ def answer_question(text, question):
     return response.choices[0].message.content
 
 def schedule_sms(phone, message, send_time):
-    """
-    Schedule SMS via Twilio: if send_time <= now, send immediately; else mark as scheduled
-    """
     now = datetime.now()
     if send_time <= now:
         twilio_client.messages.create(
@@ -64,12 +60,12 @@ def schedule_sms(phone, message, send_time):
             from_=TWILIO_NUMBER,
             to=phone
         )
-        return "Sent Now"
+        return "Sent Immediately"
     else:
         return f"Scheduled for {send_time.strftime('%Y-%m-%d %H:%M')}"
 
 # ---------- Session State ----------
-for key in ["contract_docs", "invoices", "product_reminders", "knowledge_docs"]:
+for key in ["contract_docs", "invoices", "reminders", "knowledge_docs"]:
     if key not in st.session_state:
         st.session_state[key] = []
 
@@ -80,8 +76,8 @@ st.sidebar.header("Modules")
 
 module = st.sidebar.radio("Select Module", [
     "Contract Review & Summarizer",
-    "Invoice Generator & Payment Reminder",
-    "Product Availability Reminders",
+    "Invoice Generator & Receipt",
+    "Product Reminder SMS",
     "Document Summarizer & Knowledge Assistant"
 ])
 
@@ -96,10 +92,10 @@ div.stButton > button {
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- MODULE 1: Contract Review ----------
+# ---------- MODULE 1 ----------
 if module == "Contract Review & Summarizer":
     st.subheader("📄 Contract Review")
-    uploaded_file = st.file_uploader("Upload PDF, DOCX, or TXT contract", type=["pdf", "docx", "txt"])
+    uploaded_file = st.file_uploader("Upload contract", type=["pdf", "docx", "txt"])
     if uploaded_file:
         text = extract_text(uploaded_file)
         summary = summarize_text(text, task="contract")
@@ -108,46 +104,44 @@ if module == "Contract Review & Summarizer":
         doc = st.session_state.contract_docs[i]
         with st.expander(f"{doc['filename']}"):
             st.markdown(f"**Summary:**\n{doc['summary']}")
-            q = st.text_input("Ask another question", key=f"contract_q_{i}")
+            q = st.text_input("Ask a follow-up question", key=f"contract_q_{i}")
             if st.button("Ask", key=f"contract_btn_{i}") and q:
-                answer = answer_question(doc["text"], q)
-                doc["qa"].append((q, answer))
+                ans = answer_question(doc["text"], q)
+                doc["qa"].append((q, ans))
             for q, ans in doc["qa"]:
                 st.markdown(f"**Q:** {q}")
                 st.markdown(f"**A:** {ans}")
             if st.button("Delete", key=f"delete_contract_{i}"):
                 st.session_state.contract_docs.pop(i)
 
-# ---------- MODULE 2: Invoice Generator ----------
-elif module == "Invoice Generator & Payment Reminder":
+# ---------- MODULE 2 ----------
+elif module == "Invoice Generator & Receipt":
     st.subheader("🧾 Professional Invoice Generator")
-
     col1, col2 = st.columns(2)
     with col1:
         client_name = st.text_input("Client Name")
+        client_email = st.text_input("Client Email (Optional)")
     with col2:
-        order_id = st.text_input("Invoice / Receipt Number")
+        order_id = st.text_input("Invoice Number")
         amount = st.number_input("Amount ($)", min_value=0.0, step=0.01)
 
     if st.button("Generate Invoice"):
-        # Professional HTML invoice
-        invoice_html = f"""
-        <div style="max-width:650px;margin:auto;padding:30px;border-radius:15px;
-        border:2px solid #4B8BBE;font-family:Arial,sans-serif;background:#f9f9f9">
-        <h1 style="text-align:center;color:#4B8BBE;">💼 Invoice</h1>
-        <hr>
-        <p><strong>Invoice #: </strong>{order_id}</p>
-        <p><strong>Client: </strong>{client_name}</p>
-        <p><strong>Amount Due: </strong>${amount:.2f}</p>
-        <hr>
-        <p style="text-align:center;font-size:1.1em;">Thank you for your business! 💙</p>
+        receipt_html = f"""
+        <div style="max-width:700px;margin:auto;padding:25px;
+        border-radius:12px;border:2px solid #4B8BBE;font-family:Arial;background-color:#f5f7fa">
+            <h2 style="text-align:center;color:#4B8BBE;">INVOICE</h2>
+            <p><strong>Invoice #:</strong> {order_id}</p>
+            <p><strong>Client:</strong> {client_name}</p>
+            <p><strong>Amount Due:</strong> <span style="color:green;font-weight:bold;">${amount:.2f}</span></p>
+            <hr>
+            <p style="text-align:center;">Thank you for your business! 💙</p>
         </div>
         """
         st.session_state.invoices.append({
             "order_id": order_id,
             "client": client_name,
             "amount": amount,
-            "html": invoice_html
+            "html": receipt_html
         })
 
     for i in range(len(st.session_state.invoices)-1, -1, -1):
@@ -155,8 +149,8 @@ elif module == "Invoice Generator & Payment Reminder":
         with st.expander(f"Invoice #{inv['order_id']} - {inv['client']}"):
             st.markdown(inv["html"], unsafe_allow_html=True)
             st.download_button(
-                label="📥 Download Invoice",
-                data=inv["html"],
+                "📥 Download Invoice",
+                inv["html"],
                 file_name=f"Invoice_{inv['order_id']}.html",
                 mime="text/html",
                 key=f"download_invoice_{i}"
@@ -164,50 +158,46 @@ elif module == "Invoice Generator & Payment Reminder":
             if st.button("Delete Invoice", key=f"delete_invoice_{i}"):
                 st.session_state.invoices.pop(i)
 
-# ---------- MODULE 3: Product Availability Reminders ----------
-elif module == "Product Availability Reminders":
-    st.subheader("📲 Product Availability Reminder")
+# ---------- MODULE 3 ----------
+elif module == "Product Reminder SMS":
+    st.subheader("📲 Product Reminder via SMS")
+    message = st.text_area("Type the message to send to your customers")
+    numbers = st.text_input("Client Phone Numbers (comma-separated with country code)")
 
-    products_input = st.text_input("Product(s) (comma-separated)")
-    clients_input = st.text_input("Client Phone Numbers (comma-separated, with country code)")
-    message_input = st.text_area("Custom Message to Send", value="Your product(s) will be available soon!")
-    
-    schedule_option = st.radio("Send Message", ["Now", "In X Minutes"])
-    minutes_input = st.number_input("Minutes from now (if not Now)", min_value=1, step=1, value=5)
+    send_option = st.radio("Send Time", ["Now", "Minutes", "Hours"])
+    delay_value = 0
+    if send_option != "Now":
+        delay_value = st.number_input(f"Delay ({send_option})", min_value=1, step=1)
 
-    if st.button("Schedule Reminder"):
-        send_time = datetime.now()
-        if schedule_option != "Now":
-            send_time += timedelta(minutes=minutes_input)
+    if st.button("Send Reminder"):
+        phones = [x.strip() for x in numbers.split(",") if x.strip()]
+        if send_option == "Now":
+            send_time = datetime.now()
+        elif send_option == "Minutes":
+            send_time = datetime.now() + timedelta(minutes=delay_value)
+        elif send_option == "Hours":
+            send_time = datetime.now() + timedelta(hours=delay_value)
 
-        products = [x.strip() for x in products_input.split(",") if x.strip()]
-        clients = [x.strip() for x in clients_input.split(",") if x.strip()]
-
-        for phone in clients:
-            msg = message_input.replace("{products}", ", ".join(products))
-            status = schedule_sms(phone, msg, send_time)
-            st.session_state.product_reminders.append({
-                "products": products,
+        for phone in phones:
+            status = schedule_sms(phone, message, send_time)
+            st.session_state.reminders.append({
                 "phone": phone,
+                "message": message,
                 "time": send_time,
-                "message": msg,
                 "status": status
             })
 
-    for i in range(len(st.session_state.product_reminders)-1, -1, -1):
-        r = st.session_state.product_reminders[i]
-        with st.expander(f"{r['phone']} - {', '.join(r['products'])}"):
-            st.write(f"📦 Products: {', '.join(r['products'])}")
-            st.write(f"📱 Phone: {r['phone']}")
-            st.write(f"⏰ Scheduled Time: {r['time']}")
-            st.write(f"💬 Message: {r['message']}")
-            st.write(f"⚡ Status: {r['status']}")
+    for i in range(len(st.session_state.reminders)-1, -1, -1):
+        r = st.session_state.reminders[i]
+        with st.expander(f"{r['phone']} - Status: {r['status']}"):
+            st.write(f"Message: {r['message']}")
+            st.write(f"Scheduled Time: {r['time']}")
             if st.button("Delete Reminder", key=f"delete_reminder_{i}"):
-                st.session_state.product_reminders.pop(i)
+                st.session_state.reminders.pop(i)
 
-# ---------- MODULE 4: Document Summarizer ----------
+# ---------- MODULE 4 ----------
 elif module == "Document Summarizer & Knowledge Assistant":
-    st.subheader("🧠 Document Summarizer & Q&A")
+    st.subheader("🧠 Document Q&A")
     uploaded_doc = st.file_uploader("Upload PDF, DOCX, or TXT document", type=["pdf", "docx", "txt"])
     if uploaded_doc:
         doc_text = extract_text(uploaded_doc)
