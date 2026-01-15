@@ -6,15 +6,33 @@ from docx import Document
 from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
-from twilio.rest import Client as TwilioClient
+import requests
 
 load_dotenv()
 
-# ---------- Twilio Setup ----------
-TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
-twilio_client = TwilioClient(TWILIO_SID, TWILIO_TOKEN)
+# ---------- Telegram Bot Setup ----------
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_BOT_LINK = f"https://t.me/{os.getenv('TELEGRAM_BOT_USERNAME')}"
+
+def send_telegram(chat_id, message):
+    """Send a Telegram message immediately."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": message}
+    try:
+        response = requests.post(url, json=payload)
+        if response.status_code != 200:
+            return f"Failed: {response.text}"
+        return "Sent Successfully"
+    except Exception as e:
+        return f"Failed: {e}"
+
+def schedule_telegram(chat_id, message, send_time):
+    """Schedule Telegram messages. If send_time <= now, send immediately."""
+    now = datetime.now()
+    if send_time <= now:
+        return send_telegram(chat_id, message)
+    else:
+        return f"Scheduled for {send_time.strftime('%Y-%m-%d %H:%M')}"
 
 # ---------- OpenAI Setup ----------
 key = os.getenv("OpenAI_API_KEY")
@@ -52,20 +70,8 @@ def answer_question(text, question):
     )
     return response.choices[0].message.content
 
-def schedule_sms(phone, message, send_time):
-    now = datetime.now()
-    if send_time <= now:
-        twilio_client.messages.create(
-            body=message,
-            from_=TWILIO_NUMBER,
-            to=phone
-        )
-        return "Sent Immediately"
-    else:
-        return f"Scheduled for {send_time.strftime('%Y-%m-%d %H:%M')}"
-
 # ---------- Session State ----------
-for key in ["contract_docs", "invoices", "reminders", "knowledge_docs"]:
+for key in ["contract_docs", "invoices", "reminders", "knowledge_docs", "telegram_customers"]:
     if key not in st.session_state:
         st.session_state[key] = []
 
@@ -77,7 +83,7 @@ st.sidebar.header("Modules")
 module = st.sidebar.radio("Select Module", [
     "Contract Review & Summarizer",
     "Invoice Generator & Receipt",
-    "Product Reminder SMS",
+    "Product Reminder Telegram",
     "Document Summarizer & Knowledge Assistant"
 ])
 
@@ -159,37 +165,52 @@ elif module == "Invoice Generator & Receipt":
                 st.session_state.invoices.pop(i)
 
 # ---------- MODULE 3 ----------
-elif module == "Product Reminder SMS":
-    st.subheader("📲 Product Reminder via SMS")
-    message = st.text_area("Type the message to send to your customers")
-    numbers = st.text_input("Client Phone Numbers (comma-separated with country code)")
+elif module == "Product Reminder Telegram":
+    st.subheader("📲 Product Reminder via Telegram")
+    
+    # --- Onboarding Instructions ---
+    st.markdown("**Step 1: Share this bot link with your customers:**")
+    st.code(f"{TELEGRAM_BOT_LINK}", language="text")
+    st.markdown("Customers must click **Start** once to receive messages.")
 
-    send_option = st.radio("Send Time", ["Now", "Minutes", "Hours"])
+    # --- Add New Customers ---
+    st.markdown("**Step 2: Add customer chat IDs**")
+    new_chat_id = st.text_input("Enter new customer chat ID")
+    if st.button("Add Customer"):
+        if new_chat_id.strip() and new_chat_id not in st.session_state.telegram_customers:
+            st.session_state.telegram_customers.append(new_chat_id.strip())
+
+    # --- Message Composition ---
+    message = st.text_area("Type the message to send")
+    send_option = st.radio("Send Time", ["Now", "Minutes", "Hours", "Days"])
     delay_value = 0
     if send_option != "Now":
         delay_value = st.number_input(f"Delay ({send_option})", min_value=1, step=1)
 
     if st.button("Send Reminder"):
-        phones = [x.strip() for x in numbers.split(",") if x.strip()]
         if send_option == "Now":
             send_time = datetime.now()
         elif send_option == "Minutes":
             send_time = datetime.now() + timedelta(minutes=delay_value)
         elif send_option == "Hours":
             send_time = datetime.now() + timedelta(hours=delay_value)
+        elif send_option == "Days":
+            send_time = datetime.now() + timedelta(days=delay_value)
 
-        for phone in phones:
-            status = schedule_sms(phone, message, send_time)
+        for chat_id in st.session_state.telegram_customers:
+            status = schedule_telegram(chat_id, message, send_time)
             st.session_state.reminders.append({
-                "phone": phone,
+                "chat_id": chat_id,
                 "message": message,
                 "time": send_time,
                 "status": status
             })
 
+    # --- Display Reminders ---
+    st.markdown("**Sent / Scheduled Reminders**")
     for i in range(len(st.session_state.reminders)-1, -1, -1):
         r = st.session_state.reminders[i]
-        with st.expander(f"{r['phone']} - Status: {r['status']}"):
+        with st.expander(f"{r['chat_id']} - Status: {r['status']}"):
             st.write(f"Message: {r['message']}")
             st.write(f"Scheduled Time: {r['time']}")
             if st.button("Delete Reminder", key=f"delete_reminder_{i}"):
@@ -216,3 +237,4 @@ elif module == "Document Summarizer & Knowledge Assistant":
                 st.markdown(f"**A:** {ans}")
             if st.button("Delete Document", key=f"delete_doc_{i}"):
                 st.session_state.knowledge_docs.pop(i)
+
