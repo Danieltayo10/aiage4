@@ -76,8 +76,8 @@ for key in ["contract_docs", "invoices", "reminders", "knowledge_docs", "telegra
         st.session_state[key] = []
 
 # ---------- Load Telegram chat_ids automatically ----------
-if os.path.exists("telegram_users.txt"):
-    with open("telegram_users.txt") as f:
+if os.path.exists("data/telegram_users.txt"):
+    with open("data/telegram_users.txt") as f:
         ids = [line.strip().split(",")[0] for line in f.readlines()]
         for chat_id in ids:
             if chat_id not in st.session_state.telegram_customers:
@@ -187,6 +187,13 @@ elif module == "Product Reminder Telegram":
     if st.button("Add Customer"):
         if new_chat_id.strip() and new_chat_id not in st.session_state.telegram_customers:
             st.session_state.telegram_customers.append(new_chat_id.strip())
+
+    # --- Display loaded chat IDs (for Render Free Plan) ---
+    st.markdown("**Loaded Customer Chat IDs:**")
+    if st.session_state.telegram_customers:
+        st.write(st.session_state.telegram_customers)
+    else:
+        st.write("No customers yet.")
 
     # --- Message Composition ---
     message = st.text_area("Type the message to send")
