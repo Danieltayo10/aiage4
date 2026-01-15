@@ -1,12 +1,9 @@
 streamlit==1.26.0
-openai
 PyPDF2
 python-docx
-beautifulsoup4
 requests
-sendgrid
 python-dotenv
-twilio
+openai
 fastapi
 uvicorn[standard]
 pydantic
