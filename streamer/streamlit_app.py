@@ -75,6 +75,14 @@ for key in ["contract_docs", "invoices", "reminders", "knowledge_docs", "telegra
     if key not in st.session_state:
         st.session_state[key] = []
 
+# ---------- Load Telegram chat_ids automatically ----------
+if os.path.exists("telegram_users.txt"):
+    with open("telegram_users.txt") as f:
+        ids = [line.strip().split(",")[0] for line in f.readlines()]
+        for chat_id in ids:
+            if chat_id not in st.session_state.telegram_customers:
+                st.session_state.telegram_customers.append(chat_id)
+
 # ---------- Streamlit Layout ----------
 st.set_page_config(page_title="SmartBiz AI Suite", layout="wide")
 st.markdown("<h1 style='text-align: center; color: #4B8BBE;'>🚀 SmartBiz AI Suite</h1>", unsafe_allow_html=True)
@@ -174,7 +182,7 @@ elif module == "Product Reminder Telegram":
     st.markdown("Customers must click **Start** once to receive messages.")
 
     # --- Add New Customers ---
-    st.markdown("**Step 2: Add customer chat IDs**")
+    st.markdown("**Step 2: Add customer chat IDs** (auto-loaded from bot)")
     new_chat_id = st.text_input("Enter new customer chat ID")
     if st.button("Add Customer"):
         if new_chat_id.strip() and new_chat_id not in st.session_state.telegram_customers:
@@ -237,4 +245,3 @@ elif module == "Document Summarizer & Knowledge Assistant":
                 st.markdown(f"**A:** {ans}")
             if st.button("Delete Document", key=f"delete_doc_{i}"):
                 st.session_state.knowledge_docs.pop(i)
-
