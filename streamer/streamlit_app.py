@@ -16,7 +16,7 @@ from twilio.rest import Client as TwilioClient
 
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+TWILIO_NUMBER = os.getenv("TWILIO_SMS_NUMBER")
 twilio_client = TwilioClient(TWILIO_SID, TWILIO_TOKEN)
 
 # ---------- OpenAI Setup ----------
