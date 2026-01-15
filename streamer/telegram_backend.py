@@ -21,4 +21,9 @@ async def telegram_webhook(req: Request):
             f.write(f"{chat_id},{username},{first_name}\n")
     return {"ok": True}
 
+
+@app.get("/telegram-webhook")
+def test_get():
+    return {"ok": "Webhook is running, POST messages will be accepted here."}
+
 # Run locally for dev: uvicorn telegram_backend:app --host 0.0.0.0 --port 8001
