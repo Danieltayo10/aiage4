@@ -1,59 +1,77 @@
 # telegram_backend.py
-import os
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from datetime import datetime
+import sqlite3
+import os
+import threading
+import time
+import requests
 
-# ---------- Load environment ----------
-from dotenv import load_dotenv
-load_dotenv()
+app = FastAPI()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# ---------- FastAPI app ----------
-app = FastAPI(title="Telegram Backend for SmartBiz AI Suite")
+DB_FILE = "reminders.db"
 
-# ---------- Ensure data folder exists ----------
+# ---------- Create DB ----------
 os.makedirs("data", exist_ok=True)
-USERS_FILE = "data/telegram_users.txt"
+conn = sqlite3.connect(DB_FILE)
+c = conn.cursor()
+c.execute("""
+CREATE TABLE IF NOT EXISTS reminders (
+    chat_id TEXT,
+    message TEXT,
+    send_time TEXT,
+    status TEXT
+)
+""")
+conn.commit()
+conn.close()
 
-# ---------- Webhook route ----------
+# ---------- Telegram Webhook (for new users) ----------
 @app.post("/telegram-webhook")
 async def telegram_webhook(req: Request):
-    """
-    Receives updates from Telegram when a user clicks /start.
-    Automatically saves chat_id, username, first_name.
-    """
+    data = await req.json()
+    chat = data.get("message", {}).get("chat", {})
+    chat_id = chat.get("id")
+    username = chat.get("username", "")
+    first_name = chat.get("first_name", "")
+    if chat_id:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("INSERT OR IGNORE INTO reminders (chat_id,message,send_time,status) VALUES (?,?,?,?)",
+                  (str(chat_id), "", datetime.now().isoformat(), "added"))
+        conn.commit()
+        conn.close()
+    return {"ok": True}
+
+# ---------- Function to send Telegram message ----------
+def send_telegram(chat_id, message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": message}
     try:
-        data = await req.json()
-        chat = data.get("message", {}).get("chat", {})
-        chat_id = chat.get("id")
-        username = chat.get("username", "")
-        first_name = chat.get("first_name", "")
+        r = requests.post(url, json=payload, timeout=15)
+        return r.status_code == 200
+    except:
+        return False
 
-        if chat_id:
-            # Append to users file only if not already saved
-            existing_ids = set()
-            if os.path.exists(USERS_FILE):
-                with open(USERS_FILE, "r") as f:
-                    existing_ids = set(line.strip().split(",")[0] for line in f.readlines())
+# ---------- Background scheduler ----------
+def scheduler_loop():
+    while True:
+        now = datetime.now()
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("SELECT rowid, chat_id, message, send_time FROM reminders WHERE status='scheduled'")
+        rows = c.fetchall()
+        for rowid, chat_id, message, send_time_str in rows:
+            send_time = datetime.fromisoformat(send_time_str)
+            if now >= send_time:
+                success = send_telegram(chat_id, message)
+                status = "sent" if success else "failed"
+                c.execute("UPDATE reminders SET status=? WHERE rowid=?", (status, rowid))
+        conn.commit()
+        conn.close()
+        time.sleep(10)  # check every 10 seconds
 
-            if str(chat_id) not in existing_ids:
-                with open(USERS_FILE, "a") as f:
-                    f.write(f"{chat_id},{username},{first_name}\n")
-
-                # Log for Render Free Plan visibility
-                print(f"[NEW USER] chat_id: {chat_id}, username: {username}, first_name: {first_name}")
-            else:
-                print(f"[EXISTING USER] chat_id: {chat_id}")
-
-        return JSONResponse(content={"ok": True})
-
-    except Exception as e:
-        print(f"[ERROR] {e}")
-        return JSONResponse(content={"ok": False, "error": str(e)}, status_code=500)
-
-
-# ---------- Optional health check ----------
-@app.get("/health")
-async def health():
-    return JSONResponse(content={"status": "ok"})
+# ---------- Start scheduler in background thread ----------
+threading.Thread(target=scheduler_loop, daemon=True).start()
