@@ -4,8 +4,6 @@ import streamlit as st
 import PyPDF2
 from docx import Document
 from openai import OpenAI
-import requests
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
@@ -16,7 +14,7 @@ from twilio.rest import Client as TwilioClient
 
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_NUMBER = os.getenv("TWILIO_SMS_NUMBER")
+TWILIO_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 twilio_client = TwilioClient(TWILIO_SID, TWILIO_TOKEN)
 
 # ---------- OpenAI Setup ----------
@@ -57,32 +55,23 @@ def answer_question(text, question):
 
 def schedule_sms(phone, message, send_time):
     """
-    Schedule SMS via Twilio with timed delivery (if delayed)
-    Twilio Programmable Messaging cannot delay delivery on all plans,
-    so we compute time difference and call when due.
+    Schedule SMS via Twilio: if send_time <= now, send immediately; else mark as scheduled
     """
     now = datetime.now()
     if send_time <= now:
-        # Send immediately
         twilio_client.messages.create(
             body=message,
             from_=TWILIO_NUMBER,
             to=phone
         )
-        return "Sent Immediately"
+        return "Sent Now"
     else:
-        # Store reminder
         return f"Scheduled for {send_time.strftime('%Y-%m-%d %H:%M')}"
 
 # ---------- Session State ----------
-if "contract_docs" not in st.session_state:
-    st.session_state["contract_docs"] = []
-if "invoices" not in st.session_state:
-    st.session_state["invoices"] = []
-if "product_reminders" not in st.session_state:
-    st.session_state["product_reminders"] = []
-if "knowledge_docs" not in st.session_state:
-    st.session_state["knowledge_docs"] = []
+for key in ["contract_docs", "invoices", "product_reminders", "knowledge_docs"]:
+    if key not in st.session_state:
+        st.session_state[key] = []
 
 # ---------- Streamlit Layout ----------
 st.set_page_config(page_title="SmartBiz AI Suite", layout="wide")
@@ -131,77 +120,77 @@ if module == "Contract Review & Summarizer":
 
 # ---------- MODULE 2: Invoice Generator ----------
 elif module == "Invoice Generator & Payment Reminder":
-    st.subheader("💰 Invoice Generator")
+    st.subheader("🧾 Professional Invoice Generator")
+
     col1, col2 = st.columns(2)
     with col1:
         client_name = st.text_input("Client Name")
     with col2:
-        order_id = st.text_input("Order ID")
+        order_id = st.text_input("Invoice / Receipt Number")
         amount = st.number_input("Amount ($)", min_value=0.0, step=0.01)
 
     if st.button("Generate Invoice"):
-        receipt_html = f"""
-        <div style="max-width:600px;margin:auto;padding:30px;
-        border-radius:12px;border:1px solid #ddd;font-family:Arial">
-        <h2 style="text-align:center;color:#4B8BBE;">Payment Receipt</h2>
-        <p><strong>Receipt #:</strong> {order_id}</p>
-        <p><strong>Client:</strong> {client_name}</p>
-        <p><strong>Amount Paid:</strong> ${amount:.2f}</p>
+        # Professional HTML invoice
+        invoice_html = f"""
+        <div style="max-width:650px;margin:auto;padding:30px;border-radius:15px;
+        border:2px solid #4B8BBE;font-family:Arial,sans-serif;background:#f9f9f9">
+        <h1 style="text-align:center;color:#4B8BBE;">💼 Invoice</h1>
         <hr>
-        <p style="text-align:center;">Thank you for your business 💙</p>
+        <p><strong>Invoice #: </strong>{order_id}</p>
+        <p><strong>Client: </strong>{client_name}</p>
+        <p><strong>Amount Due: </strong>${amount:.2f}</p>
+        <hr>
+        <p style="text-align:center;font-size:1.1em;">Thank you for your business! 💙</p>
         </div>
         """
-        st.session_state.invoices.append({"order_id": order_id, "client": client_name, "amount": amount, "html": receipt_html})
+        st.session_state.invoices.append({
+            "order_id": order_id,
+            "client": client_name,
+            "amount": amount,
+            "html": invoice_html
+        })
 
     for i in range(len(st.session_state.invoices)-1, -1, -1):
         inv = st.session_state.invoices[i]
         with st.expander(f"Invoice #{inv['order_id']} - {inv['client']}"):
             st.markdown(inv["html"], unsafe_allow_html=True)
             st.download_button(
-                label="📥 Download Receipt",
+                label="📥 Download Invoice",
                 data=inv["html"],
-                file_name=f"Receipt_{inv['order_id']}.html",
+                file_name=f"Invoice_{inv['order_id']}.html",
                 mime="text/html",
                 key=f"download_invoice_{i}"
             )
             if st.button("Delete Invoice", key=f"delete_invoice_{i}"):
                 st.session_state.invoices.pop(i)
 
-# ---------- MODULE 3: Product Availability Reminders (Twilio) ----------
+# ---------- MODULE 3: Product Availability Reminders ----------
 elif module == "Product Availability Reminders":
     st.subheader("📲 Product Availability Reminder")
 
-    product_list = st.text_input("Enter Product(s) (comma-separated)")
-    numbers = st.text_input("Client Phone Numbers (comma-separated, with country code)")
-    timeframe = st.text_input("Reminder Time (e.g., 'in 2 hours', '2026-02-01 14:00')")
+    products_input = st.text_input("Product(s) (comma-separated)")
+    clients_input = st.text_input("Client Phone Numbers (comma-separated, with country code)")
+    message_input = st.text_area("Custom Message to Send", value="Your product(s) will be available soon!")
+    
+    schedule_option = st.radio("Send Message", ["Now", "In X Minutes"])
+    minutes_input = st.number_input("Minutes from now (if not Now)", min_value=1, step=1, value=5)
 
     if st.button("Schedule Reminder"):
-        # Parse time
-        try:
-            if "in " in timeframe:
-                parts = timeframe.split("in ")[1].split()
-                value, unit = int(parts[0]), parts[1]
-                send_time = datetime.now()
-                if "hour" in unit:
-                    send_time += timedelta(hours=value)
-                elif "day" in unit:
-                    send_time += timedelta(days=value)
-            else:
-                send_time = datetime.strptime(timeframe, "%Y-%m-%d %H:%M")
-        except:
-            st.error("Invalid time format. Use 'in X hours' or 'YYYY-MM-DD HH:MM'")
-            send_time = datetime.now()
+        send_time = datetime.now()
+        if schedule_option != "Now":
+            send_time += timedelta(minutes=minutes_input)
 
-        products = [x.strip() for x in product_list.split(",") if x.strip()]
-        phones = [x.strip() for x in numbers.split(",") if x.strip()]
+        products = [x.strip() for x in products_input.split(",") if x.strip()]
+        clients = [x.strip() for x in clients_input.split(",") if x.strip()]
 
-        for phone in phones:
-            message = f"Reminder: {', '.join(products)} will be available soon!"
-            status = schedule_sms(phone, message, send_time)
+        for phone in clients:
+            msg = message_input.replace("{products}", ", ".join(products))
+            status = schedule_sms(phone, msg, send_time)
             st.session_state.product_reminders.append({
                 "products": products,
                 "phone": phone,
                 "time": send_time,
+                "message": msg,
                 "status": status
             })
 
@@ -210,7 +199,8 @@ elif module == "Product Availability Reminders":
         with st.expander(f"{r['phone']} - {', '.join(r['products'])}"):
             st.write(f"📦 Products: {', '.join(r['products'])}")
             st.write(f"📱 Phone: {r['phone']}")
-            st.write(f"⏰ Time: {r['time']}")
+            st.write(f"⏰ Scheduled Time: {r['time']}")
+            st.write(f"💬 Message: {r['message']}")
             st.write(f"⚡ Status: {r['status']}")
             if st.button("Delete Reminder", key=f"delete_reminder_{i}"):
                 st.session_state.product_reminders.pop(i)
