@@ -7,3 +7,6 @@ requests
 sendgrid
 python-dotenv
 twilio
+fastapi
+uvicorn[standard]
+pydantic
