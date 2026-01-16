@@ -7,13 +7,14 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 import requests
+import sqlite3
 
 load_dotenv()
 
 # ---------- Telegram Bot Setup ----------
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_BOT_LINK = f"https://t.me/{os.getenv('TELEGRAM_BOT_USERNAME')}"
-BACKEND_URL = os.getenv("TELEGRAM_BACKEND_URL")  # <--- NEW: backend URL for scheduling
+BACKEND_URL = os.getenv("TELEGRAM_BACKEND_URL")  # backend for scheduling
 
 def send_telegram(chat_id, message):
     """Send a Telegram message immediately."""
@@ -51,7 +52,7 @@ def schedule_telegram(chat_id, message, send_time):
         return f"Backend error: {e}"
 
 # ---------- OpenAI Setup ----------
-key = os.getenv("OpenAI_API_KEY")
+key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=key)
 
 # ---------- Helper Functions ----------
@@ -91,13 +92,17 @@ for key in ["contract_docs", "invoices", "reminders", "knowledge_docs", "telegra
     if key not in st.session_state:
         st.session_state[key] = []
 
-# ---------- Load Telegram chat_ids automatically ----------
-if os.path.exists("data/telegram_users.txt"):
-    with open("data/telegram_users.txt") as f:
-        ids = [line.strip().split(",")[0] for line in f.readlines()]
-        for chat_id in ids:
-            if chat_id not in st.session_state.telegram_customers:
-                st.session_state.telegram_customers.append(chat_id)
+# ---------- Load Telegram chat_ids from DB ----------
+DB_FILE = "data/reminders.db"
+if os.path.exists(DB_FILE):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT chat_id FROM reminders")
+    ids = [row[0] for row in c.fetchall()]
+    conn.close()
+    for chat_id in ids:
+        if chat_id not in st.session_state.telegram_customers:
+            st.session_state.telegram_customers.append(chat_id)
 
 # ---------- Streamlit Layout ----------
 st.set_page_config(page_title="SmartBiz AI Suite", layout="wide")
@@ -198,13 +203,13 @@ elif module == "Product Reminder Telegram":
     st.markdown("Customers must click **Start** once to receive messages.")
 
     # --- Add New Customers ---
-    st.markdown("**Step 2: Add customer chat IDs** (auto-loaded from bot)")
+    st.markdown("**Step 2: Add customer chat IDs** (auto-loaded from backend)")
     new_chat_id = st.text_input("Enter new customer chat ID")
     if st.button("Add Customer"):
         if new_chat_id.strip() and new_chat_id not in st.session_state.telegram_customers:
             st.session_state.telegram_customers.append(new_chat_id.strip())
 
-    # --- Display loaded chat IDs (for Render Free Plan) ---
+    # --- Display loaded chat IDs ---
     st.markdown("**Loaded Customer Chat IDs:**")
     if st.session_state.telegram_customers:
         st.write(st.session_state.telegram_customers)
