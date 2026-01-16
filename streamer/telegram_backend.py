@@ -21,6 +21,7 @@ c = conn.cursor()
 c.execute("""
 CREATE TABLE IF NOT EXISTS reminders (
     chat_id TEXT,
+    username TEXT,
     message TEXT,
     send_time TEXT,
     status TEXT
@@ -35,15 +36,16 @@ async def telegram_webhook(req: Request):
     data = await req.json()
     chat = data.get("message", {}).get("chat", {})
     chat_id = chat.get("id")
+    username = chat.get("username", "")
 
     if chat_id:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("""
             INSERT OR IGNORE INTO reminders
-            (chat_id, message, send_time, status)
-            VALUES (?, ?, ?, ?)
-        """, (str(chat_id), "", datetime.now().isoformat(), "added"))
+            (chat_id, username, message, send_time, status)
+            VALUES (?, ?, ?, ?, ?)
+        """, (str(chat_id), username, "", datetime.now().isoformat(), "added"))
         conn.commit()
         conn.close()
 
@@ -55,18 +57,33 @@ async def schedule_reminder(req: Request):
     data = await req.json()
     chat_id = str(data["chat_id"])
     message = data["message"]
-    send_time = data["send_time"]  # ISO string
+    send_time = data["send_time"]
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
-        INSERT INTO reminders (chat_id, message, send_time, status)
-        VALUES (?, ?, ?, 'scheduled')
-    """, (chat_id, message, send_time))
+        INSERT INTO reminders (chat_id, username, message, send_time, status)
+        VALUES (?, ?, ?, ?, 'scheduled')
+    """, (chat_id, "", message, send_time))
     conn.commit()
     conn.close()
 
     return {"status": "scheduled"}
+
+# ---------- API: List Users ----------
+@app.get("/list-users")
+async def list_users():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("""
+        SELECT DISTINCT chat_id, username
+        FROM reminders
+        WHERE status='added' OR status='scheduled' OR status='sent'
+    """)
+    rows = c.fetchall()
+    conn.close()
+    users = [{"chat_id": row[0], "username": row[1]} for row in rows]
+    return {"users": users}
 
 # ---------- Send Telegram ----------
 def send_telegram(chat_id, message):
@@ -82,7 +99,6 @@ def send_telegram(chat_id, message):
 def scheduler_loop():
     while True:
         now = datetime.now()
-
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("""
@@ -94,7 +110,6 @@ def scheduler_loop():
 
         for rowid, chat_id, message, send_time_str in rows:
             send_time = datetime.fromisoformat(send_time_str)
-
             if now >= send_time:
                 success = send_telegram(chat_id, message)
                 status = "sent" if success else "failed"
@@ -105,7 +120,6 @@ def scheduler_loop():
 
         conn.commit()
         conn.close()
-        time.sleep(10)  # Render-safe polling
+        time.sleep(10)
 
-# ---------- Start background thread ----------
 threading.Thread(target=scheduler_loop, daemon=True).start()
