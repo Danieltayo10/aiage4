@@ -7,13 +7,48 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 import requests
-import sqlite3
 
 load_dotenv()
 
 # ---------- Telegram Bot Setup ----------
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_BOT_LINK = f"https://t.me/{os.getenv('TELEGRAM_BOT_USERNAME')}"
+BACKEND_URL = os.getenv("TELEGRAM_BACKEND_URL")  # <--- NEW: backend URL for scheduling
+
+def send_telegram(chat_id, message):
+    """Send a Telegram message immediately."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": message}
+    try:
+        response = requests.post(url, json=payload)
+        if response.status_code != 200:
+            return f"Failed: {response.text}"
+        return "Sent Successfully"
+    except Exception as e:
+        return f"Failed: {e}"
+
+def schedule_telegram(chat_id, message, send_time):
+    """Schedule Telegram messages via backend. If send_time <= now, send immediately."""
+    now = datetime.now()
+
+    if send_time <= now:
+        return send_telegram(chat_id, message)
+
+    # Schedule via backend
+    payload = {
+        "chat_id": chat_id,
+        "message": message,
+        "send_time": send_time.isoformat()
+    }
+
+    try:
+        r = requests.post(f"{BACKEND_URL}/schedule-reminder", json=payload, timeout=10)
+        if r.status_code == 200:
+            return f"Scheduled for {send_time.strftime('%Y-%m-%d %H:%M')}"
+        else:
+            return "Failed to schedule"
+    except Exception as e:
+        return f"Backend error: {e}"
 
 # ---------- OpenAI Setup ----------
 key = os.getenv("OpenAI_API_KEY")
@@ -56,23 +91,17 @@ for key in ["contract_docs", "invoices", "reminders", "knowledge_docs", "telegra
     if key not in st.session_state:
         st.session_state[key] = []
 
-# ---------- Load Telegram chat IDs from backend DB ----------
-import sqlite3
-conn = sqlite3.connect("reminders.db")
-c = conn.cursor()
-c.execute("CREATE TABLE IF NOT EXISTS reminders (chat_id TEXT, message TEXT, send_time TEXT, status TEXT)")
-conn.commit()
-c.execute("SELECT DISTINCT chat_id FROM reminders")
-rows = c.fetchall()
-for row in rows:
-    chat_id = row[0]
-    if chat_id not in st.session_state.telegram_customers:
-        st.session_state.telegram_customers.append(chat_id)
-conn.close()
+# ---------- Load Telegram chat_ids automatically ----------
+if os.path.exists("data/telegram_users.txt"):
+    with open("data/telegram_users.txt") as f:
+        ids = [line.strip().split(",")[0] for line in f.readlines()]
+        for chat_id in ids:
+            if chat_id not in st.session_state.telegram_customers:
+                st.session_state.telegram_customers.append(chat_id)
 
 # ---------- Streamlit Layout ----------
 st.set_page_config(page_title="SmartBiz AI Suite", layout="wide")
-st.markdown("<h1 style='text-align: center; color: #4B8BBE;'>🚀 SmartBiz AI Suite</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center; color: #4B8BBE;'> SmartBiz AI Suite</h1>", unsafe_allow_html=True)
 st.sidebar.header("Modules")
 
 module = st.sidebar.radio("Select Module", [
@@ -93,27 +122,94 @@ div.stButton > button {
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- MODULE 3 ----------
-if module == "Product Reminder Telegram":
-    st.subheader("📲 Product Reminder via Telegram")
+# ---------- MODULE 1 ----------
+if module == "Contract Review & Summarizer":
+    st.subheader(" Contract Review")
+    uploaded_file = st.file_uploader("Upload contract", type=["pdf", "docx", "txt"])
+    if uploaded_file:
+        text = extract_text(uploaded_file)
+        summary = summarize_text(text, task="contract")
+        st.session_state.contract_docs.append({"filename": uploaded_file.name, "text": text, "summary": summary, "qa": []})
+    for i in range(len(st.session_state.contract_docs)-1, -1, -1):
+        doc = st.session_state.contract_docs[i]
+        with st.expander(f"{doc['filename']}"):
+            st.markdown(f"**Summary:**\n{doc['summary']}")
+            q = st.text_input("Ask a follow-up question", key=f"contract_q_{i}")
+            if st.button("Ask", key=f"contract_btn_{i}") and q:
+                ans = answer_question(doc["text"], q)
+                doc["qa"].append((q, ans))
+            for q, ans in doc["qa"]:
+                st.markdown(f"**Q:** {q}")
+                st.markdown(f"**A:** {ans}")
+            if st.button("Delete", key=f"delete_contract_{i}"):
+                st.session_state.contract_docs.pop(i)
 
+# ---------- MODULE 2 ----------
+elif module == "Invoice Generator & Receipt":
+    st.subheader(" Professional Invoice Generator")
+    col1, col2 = st.columns(2)
+    with col1:
+        client_name = st.text_input("Client Name")
+        client_email = st.text_input("Client Email (Optional)")
+    with col2:
+        order_id = st.text_input("Invoice Number")
+        amount = st.number_input("Amount ($)", min_value=0.0, step=0.01)
+
+    if st.button("Generate Invoice"):
+        receipt_html = f"""
+        <div style="max-width:700px;margin:auto;padding:25px;
+        border-radius:12px;border:2px solid #4B8BBE;font-family:Arial;background-color:#f5f7fa">
+            <h2 style="text-align:center;color:#4B8BBE;">INVOICE</h2>
+            <p><strong>Invoice #:</strong> {order_id}</p>
+            <p><strong>Client:</strong> {client_name}</p>
+            <p><strong>Amount Due:</strong> <span style="color:green;font-weight:bold;">${amount:.2f}</span></p>
+            <hr>
+            <p style="text-align:center;">Thank you for your business! </p>
+        </div>
+        """
+        st.session_state.invoices.append({
+            "order_id": order_id,
+            "client": client_name,
+            "amount": amount,
+            "html": receipt_html
+        })
+
+    for i in range(len(st.session_state.invoices)-1, -1, -1):
+        inv = st.session_state.invoices[i]
+        with st.expander(f"Invoice #{inv['order_id']} - {inv['client']}"):
+            st.markdown(inv["html"], unsafe_allow_html=True)
+            st.download_button(
+                " Download Invoice",
+                inv["html"],
+                file_name=f"Invoice_{inv['order_id']}.html",
+                mime="text/html",
+                key=f"download_invoice_{i}"
+            )
+            if st.button("Delete Invoice", key=f"delete_invoice_{i}"):
+                st.session_state.invoices.pop(i)
+
+# ---------- MODULE 3 ----------
+elif module == "Product Reminder Telegram":
+    st.subheader(" Product Reminder via Telegram")
+    
     # --- Onboarding Instructions ---
     st.markdown("**Step 1: Share this bot link with your customers:**")
     st.code(f"{TELEGRAM_BOT_LINK}", language="text")
     st.markdown("Customers must click **Start** once to receive messages.")
 
     # --- Add New Customers ---
-    st.markdown("**Step 2: Add customer chat IDs** (auto-loaded from backend)")
+    st.markdown("**Step 2: Add customer chat IDs** (auto-loaded from bot)")
     new_chat_id = st.text_input("Enter new customer chat ID")
     if st.button("Add Customer"):
         if new_chat_id.strip() and new_chat_id not in st.session_state.telegram_customers:
             st.session_state.telegram_customers.append(new_chat_id.strip())
-            conn = sqlite3.connect("reminders.db")
-            c = conn.cursor()
-            c.execute("INSERT OR IGNORE INTO reminders (chat_id,message,send_time,status) VALUES (?,?,?,?)",
-                      (new_chat_id.strip(),"",datetime.now().isoformat(),"added"))
-            conn.commit()
-            conn.close()
+
+    # --- Display loaded chat IDs (for Render Free Plan) ---
+    st.markdown("**Loaded Customer Chat IDs:**")
+    if st.session_state.telegram_customers:
+        st.write(st.session_state.telegram_customers)
+    else:
+        st.write("No customers yet.")
 
     # --- Message Composition ---
     message = st.text_area("Type the message to send")
@@ -132,23 +228,43 @@ if module == "Product Reminder Telegram":
         elif send_option == "Days":
             send_time = datetime.now() + timedelta(days=delay_value)
 
-        conn = sqlite3.connect("reminders.db")
-        c = conn.cursor()
         for chat_id in st.session_state.telegram_customers:
-            c.execute("INSERT INTO reminders (chat_id,message,send_time,status) VALUES (?,?,?,?)",
-                      (chat_id, message, send_time.isoformat(), "scheduled"))
-        conn.commit()
-        conn.close()
-        st.success("Reminder scheduled successfully!")
+            status = schedule_telegram(chat_id, message, send_time)
+            st.session_state.reminders.append({
+                "chat_id": chat_id,
+                "message": message,
+                "time": send_time,
+                "status": status
+            })
 
     # --- Display Reminders ---
     st.markdown("**Sent / Scheduled Reminders**")
-    conn = sqlite3.connect("reminders.db")
-    c = conn.cursor()
-    c.execute("SELECT chat_id,message,send_time,status FROM reminders ORDER BY send_time DESC")
-    rows = c.fetchall()
-    conn.close()
-    for i, (chat_id, msg, send_time, status) in enumerate(rows):
-        with st.expander(f"{chat_id} - Status: {status}"):
-            st.write(f"Message: {msg}")
-            st.write(f"Scheduled Time: {send_time}")
+    for i in range(len(st.session_state.reminders)-1, -1, -1):
+        r = st.session_state.reminders[i]
+        with st.expander(f"{r['chat_id']} - Status: {r['status']}"):
+            st.write(f"Message: {r['message']}")
+            st.write(f"Scheduled Time: {r['time']}")
+            if st.button("Delete Reminder", key=f"delete_reminder_{i}"):
+                st.session_state.reminders.pop(i)
+
+# ---------- MODULE 4 ----------
+elif module == "Document Summarizer & Knowledge Assistant":
+    st.subheader(" Document Q&A")
+    uploaded_doc = st.file_uploader("Upload PDF, DOCX, or TXT document", type=["pdf", "docx", "txt"])
+    if uploaded_doc:
+        doc_text = extract_text(uploaded_doc)
+        summary = summarize_text(doc_text)
+        st.session_state.knowledge_docs.append({"filename": uploaded_doc.name, "text": doc_text, "summary": summary, "qa": []})
+    for i in range(len(st.session_state.knowledge_docs)-1, -1, -1):
+        doc = st.session_state.knowledge_docs[i]
+        with st.expander(f"{doc['filename']}"):
+            st.markdown(f"**Summary:**\n{doc['summary']}")
+            q = st.text_input("Ask another question", key=f"doc_q_{i}")
+            if st.button("Ask", key=f"doc_btn_{i}") and q:
+                ans = answer_question(doc["text"], q)
+                doc["qa"].append((q, ans))
+            for q, ans in doc["qa"]:
+                st.markdown(f"**Q:** {q}")
+                st.markdown(f"**A:** {ans}")
+            if st.button("Delete Document", key=f"delete_doc_{i}"):
+                st.session_state.knowledge_docs.pop(i)
