@@ -7,14 +7,13 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 import requests
-import sqlite3
 
 load_dotenv()
 
 # ---------- Telegram Bot Setup ----------
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_BOT_LINK = f"https://t.me/{os.getenv('TELEGRAM_BOT_USERNAME')}"
-BACKEND_URL = os.getenv("TELEGRAM_BACKEND_URL")  # backend for scheduling
+BACKEND_URL = os.getenv("TELEGRAM_BACKEND_URL")  # Backend URL for scheduling
 
 def send_telegram(chat_id, message):
     """Send a Telegram message immediately."""
@@ -35,7 +34,6 @@ def schedule_telegram(chat_id, message, send_time):
     if send_time <= now:
         return send_telegram(chat_id, message)
 
-    # Schedule via backend
     payload = {
         "chat_id": chat_id,
         "message": message,
@@ -92,17 +90,17 @@ for key in ["contract_docs", "invoices", "reminders", "knowledge_docs", "telegra
     if key not in st.session_state:
         st.session_state[key] = []
 
-# ---------- Load Telegram chat_ids from DB ----------
-DB_FILE = "data/reminders.db"
-if os.path.exists(DB_FILE):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT DISTINCT chat_id FROM reminders")
-    ids = [row[0] for row in c.fetchall()]
-    conn.close()
-    for chat_id in ids:
-        if chat_id not in st.session_state.telegram_customers:
-            st.session_state.telegram_customers.append(chat_id)
+# ---------- Load Telegram chat_ids automatically from backend ----------
+try:
+    resp = requests.get(f"{BACKEND_URL}/list-users", timeout=10)
+    if resp.status_code == 200:
+        users = resp.json().get("users", [])
+        for u in users:
+            chat_id = str(u["chat_id"])
+            if chat_id not in st.session_state.telegram_customers:
+                st.session_state.telegram_customers.append(chat_id)
+except:
+    pass
 
 # ---------- Streamlit Layout ----------
 st.set_page_config(page_title="SmartBiz AI Suite", layout="wide")
