@@ -66,9 +66,11 @@ async def schedule_reminder(req: Request):
             cur.execute("""
                 INSERT INTO reminders (chat_id, username, message, send_time, status, repeat_type, repeat_interval)
                 VALUES (%s, %s, %s, %s, 'scheduled', %s, %s)
+                RETURNING id
             """, (chat_id, "", message, send_time, repeat_type, repeat_interval))
+            reminder_id = cur.fetchone()[0]
         conn.commit()
-    return {"status": "scheduled"}
+    return {"status": "scheduled", "id": reminder_id}
 
 # ---------- List Users ----------
 @app.get("/list-users")
@@ -84,20 +86,16 @@ async def list_users():
     users = [{"chat_id": row[0], "username": row[1]} for row in rows]
     return {"users": users}
 
-# ---------- Delete Reminder Permanently ----------
+# ---------- Delete Reminder Permanently (UPDATED: delete by ID) ----------
 @app.post("/delete-reminder")
 async def delete_reminder(req: Request):
     data = await req.json()
-    chat_id = str(data["chat_id"])
-    send_time = data.get("send_time")
+    reminder_id = data.get("id")
+    if not reminder_id:
+        return {"status": "failed", "detail": "No id provided"}
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if send_time:
-                cur.execute("""
-                    DELETE FROM reminders WHERE chat_id=%s AND send_time=%s
-                """, (chat_id, datetime.fromisoformat(send_time)))
-            else:
-                cur.execute("DELETE FROM reminders WHERE chat_id=%s", (chat_id,))
+            cur.execute("DELETE FROM reminders WHERE id=%s", (reminder_id,))
         conn.commit()
     return {"status": "deleted"}
 
@@ -162,7 +160,6 @@ def scheduler_loop():
                                     WHERE id=%s
                                 """, (next_time, id_))
                         else:
-                            # ✅ ONLY FIX: DELETE NON-REPEATING INSTEAD OF KEEPING IT
                             cur.execute("DELETE FROM reminders WHERE id=%s", (id_,))
 
             conn.commit()
