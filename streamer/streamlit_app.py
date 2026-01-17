@@ -27,17 +27,19 @@ def send_telegram(chat_id, message):
     except Exception as e:
         return f"Failed: {e}"
 
-def schedule_telegram(chat_id, message, send_time):
-    """Schedule Telegram messages via backend. If send_time <= now, send immediately."""
+def schedule_telegram(chat_id, message, send_time, repeat_type="none", repeat_interval=1):
+    """Schedule Telegram messages via backend. If send_time <= now and no repeat, send immediately."""
     now = datetime.now()
 
-    if send_time <= now:
+    if send_time <= now and repeat_type == "none":
         return send_telegram(chat_id, message)
 
     payload = {
         "chat_id": chat_id,
         "message": message,
-        "send_time": send_time.isoformat()
+        "send_time": send_time.isoformat(),
+        "repeat": repeat_type,
+        "repeat_interval": repeat_interval
     }
 
     try:
@@ -195,19 +197,16 @@ elif module == "Invoice Generator & Receipt":
 elif module == "Product Reminder Telegram":
     st.subheader(" Product Reminder via Telegram")
     
-    # --- Onboarding Instructions ---
     st.markdown("**Step 1: Share this bot link with your customers:**")
     st.code(f"{TELEGRAM_BOT_LINK}", language="text")
     st.markdown("Customers must click **Start** once to receive messages.")
 
-    # --- Add New Customers ---
     st.markdown("**Step 2: Add customer chat IDs** (auto-loaded from backend)")
     new_chat_id = st.text_input("Enter new customer chat ID")
     if st.button("Add Customer"):
         if new_chat_id.strip() and new_chat_id not in st.session_state.telegram_customers:
             st.session_state.telegram_customers.append(new_chat_id.strip())
 
-    # --- Display loaded chat IDs ---
     st.markdown("**Loaded Customer Chat IDs:**")
     if st.session_state.telegram_customers:
         st.write(st.session_state.telegram_customers)
@@ -221,6 +220,12 @@ elif module == "Product Reminder Telegram":
     if send_option != "Now":
         delay_value = st.number_input(f"Delay ({send_option})", min_value=1, step=1)
 
+    # --- Repeat Options (NEW) ---
+    repeat_type = st.selectbox("Repeat", ["none", "minutes", "hours", "days", "weeks", "months"])
+    repeat_interval = 1
+    if repeat_type != "none":
+        repeat_interval = st.number_input("Repeat every N units", min_value=1, step=1)
+
     if st.button("Send Reminder"):
         if send_option == "Now":
             send_time = datetime.now()
@@ -232,7 +237,7 @@ elif module == "Product Reminder Telegram":
             send_time = datetime.now() + timedelta(days=delay_value)
 
         for chat_id in st.session_state.telegram_customers:
-            status = schedule_telegram(chat_id, message, send_time)
+            status = schedule_telegram(chat_id, message, send_time, repeat_type, repeat_interval)
             st.session_state.reminders.append({
                 "chat_id": chat_id,
                 "message": message,
@@ -240,7 +245,6 @@ elif module == "Product Reminder Telegram":
                 "status": status
             })
 
-    # --- Display Reminders ---
     st.markdown("**Sent / Scheduled Reminders**")
     for i in range(len(st.session_state.reminders)-1, -1, -1):
         r = st.session_state.reminders[i]
