@@ -41,17 +41,17 @@ def schedule_telegram(chat_id, message, send_time, repeat_type="none", repeat_in
     try:
         r = requests.post(f"{BACKEND_URL}/schedule-reminder", json=payload, timeout=10)
         if r.status_code == 200:
-            # Expect backend to return the reminder id
-            return r.json() if r.headers.get("content-type") == "application/json" else f"Scheduled for {send_time.strftime('%Y-%m-%d %H:%M')}"
+            return r.json()  # Return dict containing 'id'
         else:
-            return "Failed to schedule"
+            return {"status": "failed"}
     except Exception as e:
-        return f"Backend error: {e}"
+        return {"status": f"Backend error: {e}"}
 
 def delete_reminder_backend(reminder_id):
-    """Delete reminder in backend PostgreSQL by id"""
+    """Delete reminder in backend PostgreSQL by ID"""
     try:
-        r = requests.post(f"{BACKEND_URL}/delete-reminder", json={"id": reminder_id}, timeout=10)
+        payload = {"id": reminder_id}
+        r = requests.post(f"{BACKEND_URL}/delete-reminder", json=payload, timeout=10)
         return r.json().get("status", "failed")
     except Exception as e:
         return f"Failed: {e}"
@@ -132,8 +132,74 @@ div.stButton > button {
 </style>
 """, unsafe_allow_html=True)
 
+# ---------- MODULE 1 ----------
+if module == "Contract Review & Summarizer":
+    st.subheader(" Contract Review")
+    uploaded_file = st.file_uploader("Upload contract", type=["pdf", "docx", "txt"])
+    if uploaded_file:
+        text = extract_text(uploaded_file)
+        summary = summarize_text(text, task="contract")
+        st.session_state.contract_docs.append({"filename": uploaded_file.name, "text": text, "summary": summary, "qa": []})
+    for i in range(len(st.session_state.contract_docs)-1, -1, -1):
+        doc = st.session_state.contract_docs[i]
+        with st.expander(f"{doc['filename']}"):
+            st.markdown(f"**Summary:**\n{doc['summary']}")
+            q = st.text_input("Ask a follow-up question", key=f"contract_q_{i}")
+            if st.button("Ask", key=f"contract_btn_{i}") and q:
+                ans = answer_question(doc["text"], q)
+                doc["qa"].append((q, ans))
+            for q, ans in doc["qa"]:
+                st.markdown(f"**Q:** {q}")
+                st.markdown(f"**A:** {ans}")
+            if st.button("Delete", key=f"delete_contract_{i}"):
+                st.session_state.contract_docs.pop(i)
+
+# ---------- MODULE 2 ----------
+elif module == "Invoice Generator & Receipt":
+    st.subheader(" Professional Invoice Generator")
+    col1, col2 = st.columns(2)
+    with col1:
+        client_name = st.text_input("Client Name")
+        client_email = st.text_input("Client Email (Optional)")
+    with col2:
+        order_id = st.text_input("Invoice Number")
+        amount = st.number_input("Amount ($)", min_value=0.0, step=0.01)
+
+    if st.button("Generate Invoice"):
+        receipt_html = f"""
+        <div style="max-width:700px;margin:auto;padding:25px;
+        border-radius:12px;border:2px solid #4B8BBE;font-family:Arial;background-color:#f5f7fa">
+            <h2 style="text-align:center;color:#4B8BBE;">INVOICE</h2>
+            <p><strong>Invoice #:</strong> {order_id}</p>
+            <p><strong>Client:</strong> {client_name}</p>
+            <p><strong>Amount Due:</strong> <span style="color:green;font-weight:bold;">${amount:.2f}</span></p>
+            <hr>
+            <p style="text-align:center;">Thank you for your business! </p>
+        </div>
+        """
+        st.session_state.invoices.append({
+            "order_id": order_id,
+            "client": client_name,
+            "amount": amount,
+            "html": receipt_html
+        })
+
+    for i in range(len(st.session_state.invoices)-1, -1, -1):
+        inv = st.session_state.invoices[i]
+        with st.expander(f"Invoice #{inv['order_id']} - {inv['client']}"):
+            st.markdown(inv["html"], unsafe_allow_html=True)
+            st.download_button(
+                " Download Invoice",
+                inv["html"],
+                file_name=f"Invoice_{inv['order_id']}.html",
+                mime="text/html",
+                key=f"download_invoice_{i}"
+            )
+            if st.button("Delete Invoice", key=f"delete_invoice_{i}"):
+                st.session_state.invoices.pop(i)
+
 # ---------- MODULE 3 ----------
-if module == "Product Reminder Telegram":
+elif module == "Product Reminder Telegram":
     st.subheader(" Product Reminder via Telegram")
     
     st.markdown("**Step 1: Share this bot link with your customers:**")
@@ -176,18 +242,13 @@ if module == "Product Reminder Telegram":
 
         for chat_id in st.session_state.telegram_customers:
             result = schedule_telegram(chat_id, message, send_time, repeat_type, repeat_interval)
-            reminder_id = None
-            if isinstance(result, dict) and "id" in result:
-                reminder_id = result["id"]
-                status = f"Scheduled for {send_time.strftime('%Y-%m-%d %H:%M')}"
-            else:
-                status = result
+            reminder_id = result.get("id") if isinstance(result, dict) else None
             st.session_state.reminders.append({
                 "id": reminder_id,
                 "chat_id": chat_id,
                 "message": message,
                 "time": send_time,
-                "status": status
+                "status": "Scheduled"
             })
 
     st.markdown("**Sent / Scheduled Reminders**")
@@ -198,7 +259,27 @@ if module == "Product Reminder Telegram":
             st.write(f"Scheduled Time: {r['time']}")
             if st.button("Delete Reminder", key=f"delete_reminder_{i}"):
                 if r.get("id"):
-                    status = delete_reminder_backend(r["id"])
-                else:
-                    status = "No ID to delete"
+                    delete_reminder_backend(r["id"])
                 st.session_state.reminders.pop(i)
+
+# ---------- MODULE 4 ----------
+elif module == "Document Summarizer & Knowledge Assistant":
+    st.subheader(" Document Q&A")
+    uploaded_doc = st.file_uploader("Upload PDF, DOCX, or TXT document", type=["pdf", "docx", "txt"])
+    if uploaded_doc:
+        doc_text = extract_text(uploaded_doc)
+        summary = summarize_text(doc_text)
+        st.session_state.knowledge_docs.append({"filename": uploaded_doc.name, "text": doc_text, "summary": summary, "qa": []})
+    for i in range(len(st.session_state.knowledge_docs)-1, -1, -1):
+        doc = st.session_state.knowledge_docs[i]
+        with st.expander(f"{doc['filename']}"):
+            st.markdown(f"**Summary:**\n{doc['summary']}")
+            q = st.text_input("Ask another question", key=f"doc_q_{i}")
+            if st.button("Ask", key=f"doc_btn_{i}") and q:
+                ans = answer_question(doc["text"], q)
+                doc["qa"].append((q, ans))
+            for q, ans in doc["qa"]:
+                st.markdown(f"**Q:** {q}")
+                st.markdown(f"**A:** {ans}")
+            if st.button("Delete Document", key=f"delete_doc_{i}"):
+                st.session_state.knowledge_docs.pop(i)
