@@ -108,7 +108,6 @@ async def cancel_user(req: Request):
     chat_id = str(data["chat_id"])
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # Remove all future scheduled reminders for this user
             cur.execute("""
                 DELETE FROM reminders
                 WHERE chat_id=%s AND status='scheduled'
@@ -138,10 +137,10 @@ def scheduler_loop():
                     WHERE status='scheduled'
                 """)
                 rows = cur.fetchall()
+
                 for id_, chat_id, message, send_time, repeat_type, repeat_interval in rows:
                     if now >= send_time:
                         success = send_telegram(chat_id, message)
-                        status = "sent" if success else "failed"
 
                         if repeat_type != "none" and success:
                             if repeat_type == "minutes":
@@ -156,13 +155,16 @@ def scheduler_loop():
                                 next_time = send_time + timedelta(days=30*repeat_interval)
                             else:
                                 next_time = None
+
                             if next_time:
                                 cur.execute("""
                                     UPDATE reminders SET send_time=%s, status='scheduled'
                                     WHERE id=%s
                                 """, (next_time, id_))
                         else:
-                            cur.execute("UPDATE reminders SET status=%s WHERE id=%s", (status, id_))
+                            # ✅ ONLY FIX: DELETE NON-REPEATING INSTEAD OF KEEPING IT
+                            cur.execute("DELETE FROM reminders WHERE id=%s", (id_,))
+
             conn.commit()
         time.sleep(10)
 
