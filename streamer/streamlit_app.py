@@ -86,29 +86,20 @@ async def list_users():
     users = [{"chat_id": row[0], "username": row[1]} for row in rows]
     return {"users": users}
 
-# ---------- Delete Reminder (by ID or chat_id/send_time) ----------
+# ---------- Delete Reminder Permanently (UPDATED: delete by ID) ----------
 @app.post("/delete-reminder")
 async def delete_reminder(req: Request):
     data = await req.json()
     reminder_id = data.get("id")
-    chat_id = str(data.get("chat_id", ""))
-    send_time = data.get("send_time")
-
+    if not reminder_id:
+        return {"status": "failed", "detail": "No id provided"}
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if reminder_id:
-                cur.execute("DELETE FROM reminders WHERE id=%s", (reminder_id,))
-            elif send_time:
-                cur.execute(
-                    "DELETE FROM reminders WHERE chat_id=%s AND send_time=%s",
-                    (chat_id, datetime.fromisoformat(send_time))
-                )
-            else:
-                cur.execute("DELETE FROM reminders WHERE chat_id=%s", (chat_id,))
+            cur.execute("DELETE FROM reminders WHERE id=%s", (reminder_id,))
         conn.commit()
     return {"status": "deleted"}
 
-# ---------- Cancel User (stop future messages) ----------
+# ---------- Cancel User (stop sending future messages) ----------
 @app.post("/cancel-user")
 async def cancel_user(req: Request):
     data = await req.json()
